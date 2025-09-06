@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Resume ↔ Job Description Matcher (Gradio)
 
 A Gradio app that compares an uploaded resume (PDF/DOCX) with a job description using semantic embeddings and simple keyword analysis.
@@ -15,3 +16,17 @@ A Gradio app that compares an uploaded resume (PDF/DOCX) with a job description 
 ## Deployment
 This app runs on Hugging Face Spaces (Gradio). See repository `requirements.txt`. No private keys required.
 
+=======
+---
+title: Resume Matcher
+emoji: 🐨
+colorFrom: red
+colorTo: blue
+sdk: gradio
+sdk_version: 5.44.1
+app_file: app.py
+pinned: false
+---
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+>>>>>>> b6b880b6fe5319f5c9e5db055da889c0821add1e
