@@ -1,0 +1,9 @@
+gradio>=3.0
+sentence-transformers>=2.2
+transformers>=4.41
+torch>=1.12
+scikit-learn
+numpy
+python-docx
+PyMuPDF
+nltk
