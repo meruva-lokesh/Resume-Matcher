@@ -7,3 +7,16 @@ numpy
 python-docx
 PyMuPDF
 nltk
+# Core framework
+gradio==4.41.0
+
+# Resume parsing
+PyMuPDF==1.24.9       # for PDF extraction
+python-docx==1.1.2    # for DOCX extraction
+
+# ML / NLP
+numpy==1.26.4
+scikit-learn==1.5.2
+torch==2.3.1
+transformers==4.44.2
+sentence-transformers==3.1.1
