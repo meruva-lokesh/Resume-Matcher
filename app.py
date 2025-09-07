@@ -4,7 +4,7 @@ Gradio Resume <-> Job Description Matcher (single-file)
 - Upload PDF / DOCX (processed in-memory)
 - Two embedding modes: sbert (fast) and bert (CLS)
 - Keyword analysis + section-aware suggestions
-- No gr.Examples, no breaking Gradio API usage
+- Avoids blocking downloads at import/startup
 """
 
 import io
@@ -16,8 +16,6 @@ from typing import Tuple, Dict
 
 import fitz            # PyMuPDF
 import docx            # python-docx
-import nltk
-from nltk.corpus import stopwords
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -30,12 +28,23 @@ _sentence_transformer = None
 _bert_tokenizer = None
 _bert_model = None
 
-# Ensure NLTK stopwords are available
-try:
-    nltk.data.find("corpora/stopwords")
-except Exception:
-    nltk.download("stopwords")
-EN_STOPWORDS = set(stopwords.words("english"))
+# --------------------------
+# Built-in stopwords (avoid nltk.download at startup)
+# --------------------------
+# Compact English stopword set sufficient for resume preprocessing.
+EN_STOPWORDS = {
+    "a","about","above","after","again","against","all","am","an","and","any","are","as",
+    "at","be","because","been","before","being","below","between","both","but","by",
+    "could","did","do","does","doing","down","during","each","few","for","from","further",
+    "had","has","have","having","he","her","here","hers","herself","him","himself","his",
+    "how","i","if","in","into","is","it","its","itself","just","me","more","most","my",
+    "myself","no","nor","not","now","of","off","on","once","only","or","other","ought","our",
+    "ours","ourselves","out","over","own","same","she","should","so","some","such","than",
+    "that","the","their","theirs","them","themselves","then","there","these","they","this",
+    "those","through","to","too","under","until","up","very","was","we","were","what","when",
+    "where","which","while","who","whom","why","with","would","you","your","yours","yourself",
+    "yourselves"
+}
 
 # --------------------------
 # Utilities: text extraction
@@ -90,11 +99,9 @@ def extract_text_from_fileobj(file_obj) -> Tuple[str, str]:
         # 2) If it's bytes already
         elif isinstance(file_obj, (bytes, bytearray)):
             raw_bytes = bytes(file_obj)
-            # no filename available
 
         # 3) If it's a dict-like (common in some Gradio versions)
         elif isinstance(file_obj, dict):
-            # possible keys: 'name' and 'data' or 'file_name' and 'data'
             if "name" in file_obj:
                 fname = file_obj.get("name") or fname
             elif "file_name" in file_obj:
@@ -102,12 +109,10 @@ def extract_text_from_fileobj(file_obj) -> Tuple[str, str]:
 
             data = file_obj.get("data") or file_obj.get("content") or None
             if isinstance(data, str):
-                # sometimes base64/text; try to encode
                 raw_bytes = data.encode()
             elif isinstance(data, (bytes, bytearray)):
                 raw_bytes = bytes(data)
             else:
-                # last resort: try to read other fields
                 for v in file_obj.values():
                     if isinstance(v, (bytes, bytearray)):
                         raw_bytes = bytes(v)
@@ -115,25 +120,20 @@ def extract_text_from_fileobj(file_obj) -> Tuple[str, str]:
 
         # 4) If it's a file-like object (has .read())
         elif hasattr(file_obj, "read"):
-            # some Gradio file wrappers have .name but lack read (we handled that above)
             try:
-                # seek to start if possible
                 if hasattr(file_obj, "seek"):
                     try:
                         file_obj.seek(0)
                     except Exception:
                         pass
                 raw_bytes = file_obj.read()
-                # raw_bytes could be a str (NamedString) — convert to bytes
                 if isinstance(raw_bytes, str):
                     raw_bytes = raw_bytes.encode()
                 fname = getattr(file_obj, "name", fname)
-            except Exception as e:
-                # fallback: try to stringify
+            except Exception:
                 raw_bytes = None
 
         else:
-            # Unknown type: try to coerce to bytes
             try:
                 raw_bytes = bytes(file_obj)
             except Exception:
@@ -142,11 +142,9 @@ def extract_text_from_fileobj(file_obj) -> Tuple[str, str]:
         if raw_bytes is None:
             return (f"[Error reading uploaded file: Could not extract bytes from object of type {type(file_obj)}]", fname)
 
-        # normalize filename extension
         ext = (fname.split(".")[-1].lower() if "." in fname else "")
 
-        # dispatch based on extension (or attempt to detect PDF from bytes header)
-        # quick PDF magic bytes check
+        # dispatch based on extension or magic bytes
         if ext == "pdf" or (len(raw_bytes) >= 4 and raw_bytes[:4] == b"%PDF"):
             text = extract_text_from_pdf_bytes(raw_bytes)
             return (text, fname)
@@ -154,16 +152,13 @@ def extract_text_from_fileobj(file_obj) -> Tuple[str, str]:
             text = extract_text_from_docx_bytes(raw_bytes)
             return (text, fname)
         else:
-            # If unknown extension, try PDF first, then DOCX, else decode as plain text
             if len(raw_bytes) >= 4 and raw_bytes[:4] == b"%PDF":
                 return (extract_text_from_pdf_bytes(raw_bytes), fname)
-            # try docx heuristic: DOCX is a zip archive starting with PK
             if len(raw_bytes) >= 2 and raw_bytes[:2] == b"PK":
                 try:
                     return (extract_text_from_docx_bytes(raw_bytes), fname)
                 except Exception:
                     pass
-            # default: decode as utf-8 text (resume could be txt)
             try:
                 return (raw_bytes.decode("utf-8", errors="ignore"), fname)
             except Exception as e:
@@ -357,4 +352,3 @@ if __name__ == "__main__":
     demo = build_ui()
     # For local dev: set share=True for a temporary public URL
     demo.launch(server_name="127.0.0.1", server_port=7860, share=False)
-
