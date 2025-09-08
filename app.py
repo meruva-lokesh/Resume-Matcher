@@ -14,7 +14,6 @@ import gradio as gr
 
 # --------------------------
 # Pre-load all heavy libraries and models at startup.
-# This makes the user experience much faster and avoids timeouts.
 # --------------------------
 print("Starting up: Loading transformer models...")
 from sentence_transformers import SentenceTransformer
@@ -29,7 +28,7 @@ bert_model.eval()
 print("Transformer models loaded successfully.")
 
 # --------------------------
-# Built-in stopwords (avoid nltk.download at startup)
+# Built-in stopwords
 # --------------------------
 EN_STOPWORDS = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "as",
@@ -72,7 +71,6 @@ def extract_text_from_docx_bytes(docx_bytes: bytes) -> str:
 def extract_text_from_fileobj(file_obj) -> Tuple[str, str]:
     fname = "uploaded_file"
     try:
-        # Gradio's File component provides a NamedTemporaryFile object
         fname = os.path.basename(file_obj.name)
         with open(file_obj.name, "rb") as f:
             raw_bytes = f.read()
@@ -106,7 +104,7 @@ def preprocess_text(text: str, remove_stopwords: bool = True) -> str:
 
 
 # --------------------------
-# Embedding helpers (simplified to use pre-loaded models)
+# Embedding helpers
 # --------------------------
 def get_sentence_embedding(text: str, mode: str = "sbert") -> np.ndarray:
     if mode == "sbert":
@@ -149,12 +147,10 @@ def analyze_resume_keywords(resume_text: str, job_description: str, keywords: Di
 
     missing = {}
     for cat, kws in keywords.items():
-        # Find keywords from the job description that are missing from the resume
         missing_from_cat = [kw for kw in kws if kw in job_words and kw not in resume_words]
         if missing_from_cat:
             missing[cat] = sorted(missing_from_cat)
 
-    # Heuristically detect sections in the resume for better suggestions
     low_resume = (resume_text or "").lower()
     sections_present = {
         "skills": "skills" in low_resume,
@@ -222,7 +218,8 @@ def analyze_resume(file, job_description: str, mode: str, show_cleaned: bool):
 # Build Gradio UI
 # --------------------------
 def build_ui():
-    with gr.Blocks(theme=gr.themes.Soft(), title="Resume ↔ Job Matcher") as demo:
+    # The 'theme' parameter is removed to restore the default Gradio look
+    with gr.Blocks(title="Resume ↔ Job Matcher") as demo:
         gr.Markdown("# Resume — Job Description Matcher")
         gr.Markdown(
             "Upload a PDF or DOCX resume, paste a job description, and get an instant analysis of how well they match.")
@@ -265,4 +262,5 @@ def build_ui():
 
 if __name__ == "__main__":
     demo = build_ui()
+    # "0.0.0.0" is required for deployment on platforms like Hugging Face Spaces.
     demo.launch(server_name="0.0.0.0")
