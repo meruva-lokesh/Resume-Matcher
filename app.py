@@ -226,7 +226,8 @@ def build_ui():
 
         with gr.Row():
             with gr.Column(scale=1):
-                file_in = gr.File(label="Upload resume (PDF or DOCX)", file_count="single")
+                # THIS LINE IS CHANGED to be more mobile-friendly
+                file_in = gr.File(label="Upload resume (PDF or DOCX)", file_count="single", file_types=[".pdf", ".docx"])
                 mode = gr.Radio(choices=["sbert", "bert"], value="sbert", label="Analysis Mode",
                                 info="SBERT is faster, BERT is more detailed.")
                 job_desc = gr.Textbox(lines=8, label="Job Description",
