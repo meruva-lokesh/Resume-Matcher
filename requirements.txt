@@ -1,6 +1,6 @@
 --find-links https://storage.googleapis.com/torch-cpu/torch_stable.html
-torch==2.1.0+cpu
-torchvision==0.16.0+cpu
+torch
+torchvision
 
 gradio
 scikit-learn
