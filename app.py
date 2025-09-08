@@ -11,7 +11,6 @@ import docx  # python-docx
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import gradio as gr
-from gradio.themes.utils import colors, fonts  # added for theme customization
 
 # --------------------------
 # Pre-load all heavy libraries and models at startup.
@@ -223,7 +222,7 @@ def analyze_resume(file, job_description: str, mode: str, show_cleaned: bool):
 # Build Gradio UI
 # --------------------------
 def build_ui():
-    with gr.Blocks(theme=gr.themes.Soft(primary_hue=colors.orange, font=fonts.GoogleFont("Source Sans Pro")), title="Resume ↔ Job Matcher") as demo:
+    with gr.Blocks(theme=gr.themes.Soft(), title="Resume ↔ Job Matcher") as demo:
         gr.Markdown("# Resume — Job Description Matcher")
         gr.Markdown(
             "Upload a PDF or DOCX resume, paste a job description, and get an instant analysis of how well they match.")
@@ -266,6 +265,5 @@ def build_ui():
 
 if __name__ == "__main__":
     demo = build_ui()
-    # This is set for LOCAL TESTING on your own computer.
-    # When deploying to Hugging Face, change this back to demo.launch(server_name="0.0.0.0")
-    demo.launch()
+    # "0.0.0.0" is required for deployment on platforms like Hugging Face Spaces.
+    demo.launch(server_name="0.0.0.0")
