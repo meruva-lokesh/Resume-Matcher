@@ -265,5 +265,4 @@ def build_ui():
 
 if __name__ == "__main__":
     demo = build_ui()
-    # "0.0.0.0" is required for deployment on platforms like Hugging Face Spaces.
     demo.launch(server_name="0.0.0.0")
