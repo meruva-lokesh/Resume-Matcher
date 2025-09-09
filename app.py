@@ -10,6 +10,7 @@ import docx  # python-docx
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
 import gradio as gr
 
 # --------------------------
@@ -41,7 +42,20 @@ EN_STOPWORDS = {
     "that", "the", "their", "theirs", "them", "themselves", "then", "there", "these", "they", "this",
     "those", "through", "to", "too", "under", "until", "up", "very", "was", "we", "were", "what", "when",
     "where", "which", "while", "who", "whom", "why", "with", "would", "you", "your", "yours", "yourself",
-    "yourselves"
+    "yourselves", "resume", "job", "description", "work", "experience", "skill", "skills", "applicant", "application"
+}
+
+# --------------------------
+# NEW FEATURE: Job Suggestions Database
+# --------------------------
+JOB_SUGGESTIONS_DB = {
+    "Data Scientist": {"python", "sql", "machine", "learning", "tensorflow", "pytorch", "analysis"},
+    "Data Analyst": {"sql", "python", "excel", "tableau", "analysis", "statistics"},
+    "Backend Developer": {"python", "java", "sql", "docker", "aws", "api", "git"},
+    "Frontend Developer": {"react", "javascript", "html", "css", "git", "ui", "ux"},
+    "Full-Stack Developer": {"python", "javascript", "react", "sql", "docker", "git"},
+    "Machine Learning Engineer": {"python", "tensorflow", "pytorch", "machine", "learning", "docker", "cloud"},
+    "Project Manager": {"agile", "scrum", "project", "management", "jira"}
 }
 
 
@@ -74,16 +88,13 @@ def extract_text_from_fileobj(file_obj) -> Tuple[str, str]:
         fname = os.path.basename(file_obj.name)
         with open(file_obj.name, "rb") as f:
             raw_bytes = f.read()
-
         ext = fname.split('.')[-1].lower()
-
         if ext == "pdf":
             return (extract_text_from_pdf_bytes(raw_bytes), fname)
         elif ext == "docx":
             return (extract_text_from_docx_bytes(raw_bytes), fname)
-        else:  # Fallback for .txt or other text-based files
+        else:
             return (raw_bytes.decode("utf-8", errors="ignore"), fname)
-
     except Exception as exc:
         return (f"[Error reading uploaded file: {exc}\n{traceback.format_exc()}]", fname)
 
@@ -144,20 +155,17 @@ def analyze_resume_keywords(resume_text: str, job_description: str, keywords: Di
     clean_job = preprocess_text(job_description)
     resume_words = set(clean_resume.split())
     job_words = set(clean_job.split())
-
     missing = {}
     for cat, kws in keywords.items():
         missing_from_cat = [kw for kw in kws if kw in job_words and kw not in resume_words]
         if missing_from_cat:
             missing[cat] = sorted(missing_from_cat)
-
     low_resume = (resume_text or "").lower()
     sections_present = {
         "skills": "skills" in low_resume,
         "experience": "experience" in low_resume or "employment" in low_resume,
         "summary": "summary" in low_resume or "objective" in low_resume,
     }
-
     suggestions = []
     if any(missing.values()):
         for cat, kws in missing.items():
@@ -172,16 +180,62 @@ def analyze_resume_keywords(resume_text: str, job_description: str, keywords: Di
                     suggestions.append(f"Align your Summary/Objective to mention the title '{kw}'.")
     else:
         suggestions.append("Great job! Your resume contains many of the keywords found in the job description.")
-
     return missing, "\n".join(f"- {s}" for s in suggestions)
 
 
 # --------------------------
-# Gradio app logic
+# NEW FEATURE: Functions to format outputs and extract text keywords
 # --------------------------
-def analyze_resume(file, job_description: str, mode: str, show_cleaned: bool):
-    if file is None:
-        return 0.0, "No file uploaded.", "", {}, "Please upload a PDF or DOCX resume.", ""
+def format_missing_keywords(missing: Dict) -> str:
+    if not any(missing.values()):
+        return "✅ No critical keywords seem to be missing. Great job!"
+
+    output = "### 🔑 Keywords Missing From Your Resume\n"
+    for category, keywords in missing.items():
+        if keywords:
+            output += f"**Missing {category.capitalize()}:** {', '.join(keywords)}\n"
+    return output
+
+
+def suggest_jobs(resume_text: str) -> str:
+    resume_words = set(preprocess_text(resume_text).split())
+    suggestions = []
+
+    for job_title, required_skills in JOB_SUGGESTIONS_DB.items():
+        matched_skills = resume_words.intersection(required_skills)
+        if len(matched_skills) >= 3:
+            suggestions.append(job_title)
+
+    if not suggestions:
+        return "Could not determine strong job matches from the resume. Try adding more specific skills and technologies."
+
+    output = "### 🚀 Job Titles You May Be a Good Fit For\n"
+    for job in suggestions:
+        output += f"- {job}\n"
+    return output
+
+
+def extract_top_keywords(text: str, top_n: int = 15) -> str:
+    if not text.strip():
+        return "Not enough text provided."
+    try:
+        vectorizer = TfidfVectorizer(stop_words=list(EN_STOPWORDS))
+        tfidf_matrix = vectorizer.fit_transform([text])
+        feature_names = np.array(vectorizer.get_feature_names_out())
+        scores = tfidf_matrix.toarray().flatten()
+        top_indices = scores.argsort()[-top_n:][::-1]
+        top_keywords = feature_names[top_indices]
+        return ", ".join(top_keywords)
+    except ValueError:
+        return "Could not extract keywords (text may be too short)."
+
+
+# --------------------------
+# Main Gradio app logic
+# --------------------------
+def analyze_resume(file, job_description: str, mode: str):
+    if file is None or not job_description.strip():
+        return 0.0, "Please upload a resume and paste a job description.", "", "", "", "", ""
 
     try:
         resume_text, fname = extract_text_from_fileobj(file)
@@ -194,74 +248,96 @@ def analyze_resume(file, job_description: str, mode: str, show_cleaned: bool):
         sim_pct = calculate_similarity(cleaned_resume, cleaned_job, mode=mode)
 
         if sim_pct >= 80:
-            verdict = "Excellent match"
+            verdict = f"<h3 style='color:green;'>✅ Excellent Match ({sim_pct:.2f}%)</h3>"
         elif sim_pct >= 60:
-            verdict = "Good match"
+            verdict = f"<h3 style='color:limegreen;'>👍 Good Match ({sim_pct:.2f}%)</h3>"
         elif sim_pct >= 40:
-            verdict = "Fair match — can be improved"
+            verdict = f"<h3 style='color:orange;'>⚠️ Fair Match ({sim_pct:.2f}%)</h3>"
         else:
-            verdict = "Low match — consider major revisions"
+            verdict = f"<h3 style='color:red;'>❌ Low Match ({sim_pct:.2f}%)</h3>"
 
-        missing, suggestions_text = analyze_resume_keywords(resume_text, job_description)
+        missing_dict, suggestions_text = analyze_resume_keywords(resume_text, job_description)
 
-        cleaned_preview = cleaned_resume if show_cleaned else "Preview disabled."
-        raw_preview = "\n".join([ln.strip() for ln in resume_text.splitlines() if ln.strip()][:15])
+        missing_formatted = format_missing_keywords(missing_dict)
+        job_suggestions = suggest_jobs(resume_text)
 
-        return float(sim_pct), f"{sim_pct:.2f}% — {verdict}", cleaned_preview, missing, suggestions_text, raw_preview
+        # NEW: Get top keywords as text instead of word clouds
+        resume_keywords_text = extract_top_keywords(cleaned_resume)
+        jd_keywords_text = extract_top_keywords(cleaned_job)
+
+        return float(
+            sim_pct), verdict, missing_formatted, suggestions_text, job_suggestions, resume_keywords_text, jd_keywords_text
 
     except Exception as e:
         tb = traceback.format_exc()
-        return 0.0, f"Error: {e}", "", {}, "An error occurred. Check server logs for details.", tb
+        return 0.0, f"### An Error Occurred\n`{e}`", "", "", "", "", ""
+
+
+# --------------------------
+# Clear Button Logic
+# --------------------------
+def clear_inputs():
+    return None, "", "sbert", None, None, None, None, None, None
 
 
 # --------------------------
 # Build Gradio UI
 # --------------------------
 def build_ui():
-    # The 'theme' parameter is removed to restore the default Gradio look
-    with gr.Blocks(title="Resume ↔ Job Matcher") as demo:
-        gr.Markdown("# Resume — Job Description Matcher")
+    with gr.Blocks(theme=gr.themes.Default(), title="Resume ↔ Job Matcher") as demo:
+        gr.Markdown("# 📄 Resume & Job Description Analyzer 🎯")
         gr.Markdown(
-            "Upload a PDF or DOCX resume, paste a job description, and get an instant analysis of how well they match.")
+            "Upload a resume, paste a job description, and get an instant analysis, keyword suggestions, and potential job matches.")
 
         with gr.Row():
-            with gr.Column(scale=1):
-                # THIS LINE IS CHANGED to be more mobile-friendly
-                file_in = gr.File(label="Upload resume (PDF or DOCX)", file_count="single", file_types=[".pdf", ".docx"])
+            with gr.Column(scale=2):
+                file_in = gr.File(label="Upload resume (PDF or DOCX)", file_count="single",
+                                  file_types=[".pdf", ".docx"])
+                job_desc = gr.Textbox(lines=10, label="Job Description",
+                                      placeholder="Paste the full job description here...")
                 mode = gr.Radio(choices=["sbert", "bert"], value="sbert", label="Analysis Mode",
                                 info="SBERT is faster, BERT is more detailed.")
-                job_desc = gr.Textbox(lines=8, label="Job Description",
-                                      placeholder="Paste the full job description here...")
-                show_cleaned = gr.Checkbox(label="Show cleaned (preprocessed) resume preview", value=False)
-                run_btn = gr.Button("Analyze Resume", variant="primary")
+                with gr.Row():
+                    clear_btn = gr.Button("Clear")
+                    run_btn = gr.Button("Analyze Resume", variant="primary")
 
-            with gr.Column(scale=1):
-                gr.Markdown("### Match Score")
-                score_slider = gr.Slider(value=0, minimum=0, maximum=100, step=0.01, interactive=False,
-                                         label="Similarity (%)")
-                score_text = gr.Textbox(label="Score & Verdict", interactive=False)
+            with gr.Column(scale=3):
+                with gr.Tabs():
+                    with gr.TabItem("📊 Analysis & Suggestions"):
+                        score_slider = gr.Slider(value=0, minimum=0, maximum=100, step=0.01, interactive=False,
+                                                 label="Similarity Score")
+                        score_text = gr.Markdown()
+                        suggestions_out = gr.Textbox(label="Suggestions to Improve Your Resume", interactive=False,
+                                                     lines=5)
+                        missing_out = gr.Markdown(label="Keywords Check")
 
-                gr.Markdown("### Keyword Analysis & Suggestions")
-                suggestions_out = gr.Textbox(label="Suggestions for Improvement", interactive=False, lines=5)
-                missing_out = gr.JSON(label="Missing Keywords from Job Description")
+                    with gr.TabItem("🚀 Job Suggestions"):
+                        job_suggestions_out = gr.Markdown(label="Potential Job Roles")
 
-                with gr.Accordion("Show Previews...", open=False):
-                    cleaned_preview = gr.Textbox(label="Cleaned Resume Preview", interactive=False, lines=8)
-                    raw_preview = gr.Textbox(label="Raw Extracted Resume (First 15 lines)", interactive=False, lines=8)
+                    with gr.TabItem("🔑 Top Keywords"):
+                        # REPLACED Word Clouds with Textboxes for keywords
+                        resume_keywords_out = gr.Textbox(label="Top Resume Keywords")
+                        jd_keywords_out = gr.Textbox(label="Top Job Description Keywords")
 
         run_btn.click(
             analyze_resume,
-            inputs=[file_in, job_desc, mode, show_cleaned],
-            outputs=[score_slider, score_text, cleaned_preview, missing_out, suggestions_out, raw_preview],
+            inputs=[file_in, job_desc, mode],
+            outputs=[score_slider, score_text, missing_out, suggestions_out, job_suggestions_out, resume_keywords_out,
+                     jd_keywords_out],
+            show_progress='full'
         )
 
-        gr.Markdown("---")
-        gr.Markdown("Built with Gradio. Transformer models are pre-loaded at startup.")
+        clear_btn.click(
+            clear_inputs,
+            inputs=[],
+            outputs=[file_in, job_desc, mode, score_slider, score_text, missing_out, suggestions_out,
+                     job_suggestions_out, resume_keywords_out, jd_keywords_out]
+        )
 
     return demo
 
 
 if __name__ == "__main__":
     demo = build_ui()
-    # "0.0.0.0" is required for deployment on platforms like Hugging Face Spaces.
-    demo.launch(server_name="0.0.0.0")
+    demo.launch()
+    #demo.launch(server_name="0.0.0.0")
