@@ -46,7 +46,7 @@ EN_STOPWORDS = {
 }
 
 # --------------------------
-# NEW FEATURE: Job Suggestions Database
+# Job Suggestions Database
 # --------------------------
 JOB_SUGGESTIONS_DB = {
     "Data Scientist": {"python", "sql", "machine", "learning", "tensorflow", "pytorch", "analysis"},
@@ -148,15 +148,13 @@ DEFAULT_KEYWORDS = {
 }
 
 
-def analyze_resume_keywords(resume_text: str, job_description: str, keywords: Dict = None):
-    if keywords is None:
-        keywords = DEFAULT_KEYWORDS
+def analyze_resume_keywords(resume_text: str, job_description: str):
     clean_resume = preprocess_text(resume_text)
     clean_job = preprocess_text(job_description)
     resume_words = set(clean_resume.split())
     job_words = set(clean_job.split())
     missing = {}
-    for cat, kws in keywords.items():
+    for cat, kws in DEFAULT_KEYWORDS.items():
         missing_from_cat = [kw for kw in kws if kw in job_words and kw not in resume_words]
         if missing_from_cat:
             missing[cat] = sorted(missing_from_cat)
@@ -184,12 +182,61 @@ def analyze_resume_keywords(resume_text: str, job_description: str, keywords: Di
 
 
 # --------------------------
-# NEW FEATURE: Functions to format outputs and extract text keywords
+# Project Section Analysis
+# --------------------------
+def extract_projects_section(resume_text: str) -> str:
+    project_headings = ["projects", "personal projects", "academic projects", "portfolio"]
+    end_headings = [
+        "skills", "technical skills", "experience", "work experience",
+        "education", "awards", "certifications", "languages", "references"
+    ]
+    lines = resume_text.split('\n')
+    start_index = -1
+    end_index = len(lines)
+    for i, line in enumerate(lines):
+        cleaned_line = line.strip().lower()
+        if cleaned_line in project_headings:
+            start_index = i
+            break
+    if start_index == -1:
+        return "Could not automatically identify a 'Projects' section in this resume."
+    for i in range(start_index + 1, len(lines)):
+        cleaned_line = line.strip().lower()
+        if len(cleaned_line.split()) < 4 and cleaned_line in end_headings:
+            end_index = i
+            break
+    project_section_lines = lines[start_index:end_index]
+    return "\n".join(project_section_lines)
+
+
+def analyze_projects_fit(projects_text: str, job_description_text: str, mode: str) -> str:
+    if projects_text.startswith("Could not"):
+        return "Cannot analyze project fit as no projects section was found."
+
+    cleaned_projects = preprocess_text(projects_text)
+    cleaned_job = preprocess_text(job_description_text)
+
+    if not cleaned_projects:
+        return "Projects section is empty or contains no relevant text to analyze."
+
+    project_fit_score = calculate_similarity(cleaned_projects, cleaned_job, mode=mode)
+
+    if project_fit_score >= 75:
+        verdict = f"<p style='color:green;'>✅ **Highly Relevant ({project_fit_score:.2f}%):** The projects listed are an excellent match for this job's requirements.</p>"
+    elif project_fit_score >= 50:
+        verdict = f"<p style='color:limegreen;'>👍 **Relevant ({project_fit_score:.2f}%):** The projects show relevant skills and experience for this role.</p>"
+    else:
+        verdict = f"<p style='color:orange;'>⚠️ **Moderately Relevant ({project_fit_score:.2f}%):** The projects may not directly align with the key requirements. Consider highlighting different aspects of your work.</p>"
+
+    return verdict
+
+
+# --------------------------
+# Formatting and Suggestion Functions
 # --------------------------
 def format_missing_keywords(missing: Dict) -> str:
     if not any(missing.values()):
         return "✅ No critical keywords seem to be missing. Great job!"
-
     output = "### 🔑 Keywords Missing From Your Resume\n"
     for category, keywords in missing.items():
         if keywords:
@@ -200,15 +247,12 @@ def format_missing_keywords(missing: Dict) -> str:
 def suggest_jobs(resume_text: str) -> str:
     resume_words = set(preprocess_text(resume_text).split())
     suggestions = []
-
     for job_title, required_skills in JOB_SUGGESTIONS_DB.items():
         matched_skills = resume_words.intersection(required_skills)
         if len(matched_skills) >= 3:
             suggestions.append(job_title)
-
     if not suggestions:
         return "Could not determine strong job matches from the resume. Try adding more specific skills and technologies."
-
     output = "### 🚀 Job Titles You May Be a Good Fit For\n"
     for job in suggestions:
         output += f"- {job}\n"
@@ -235,7 +279,7 @@ def extract_top_keywords(text: str, top_n: int = 15) -> str:
 # --------------------------
 def analyze_resume(file, job_description: str, mode: str):
     if file is None or not job_description.strip():
-        return 0.0, "Please upload a resume and paste a job description.", "", "", "", "", ""
+        return 0.0, "Please upload a resume and paste a job description.", "", "", "", "", "", "", ""
 
     try:
         resume_text, fname = extract_text_from_fileobj(file)
@@ -261,23 +305,27 @@ def analyze_resume(file, job_description: str, mode: str):
         missing_formatted = format_missing_keywords(missing_dict)
         job_suggestions = suggest_jobs(resume_text)
 
-        # NEW: Get top keywords as text instead of word clouds
+        projects_section = extract_projects_section(resume_text)
+        project_fit_verdict = analyze_projects_fit(projects_section, job_description, mode)
+
         resume_keywords_text = extract_top_keywords(cleaned_resume)
         jd_keywords_text = extract_top_keywords(cleaned_job)
 
-        return float(
-            sim_pct), verdict, missing_formatted, suggestions_text, job_suggestions, resume_keywords_text, jd_keywords_text
+        return (
+            float(sim_pct), verdict, missing_formatted, suggestions_text,
+            job_suggestions, projects_section, project_fit_verdict, resume_keywords_text, jd_keywords_text
+        )
 
     except Exception as e:
         tb = traceback.format_exc()
-        return 0.0, f"### An Error Occurred\n`{e}`", "", "", "", "", ""
+        return 0.0, f"### An Error Occurred\n`{e}`", "", "", "", "", "", "", ""
 
 
 # --------------------------
 # Clear Button Logic
 # --------------------------
 def clear_inputs():
-    return None, "", "sbert", None, None, None, None, None, None
+    return None, "", "sbert", None, None, None, None, None, None, None, None
 
 
 # --------------------------
@@ -311,18 +359,22 @@ def build_ui():
                                                      lines=5)
                         missing_out = gr.Markdown(label="Keywords Check")
 
+                    with gr.TabItem("🛠️ Project Analysis"):
+                        project_fit_out = gr.Markdown(label="Project Fit Verdict")
+                        projects_out = gr.Textbox(label="Extracted Projects Section", interactive=False, lines=12)
+
                     with gr.TabItem("🚀 Job Suggestions"):
                         job_suggestions_out = gr.Markdown(label="Potential Job Roles")
 
                     with gr.TabItem("🔑 Top Keywords"):
-                        # REPLACED Word Clouds with Textboxes for keywords
                         resume_keywords_out = gr.Textbox(label="Top Resume Keywords")
                         jd_keywords_out = gr.Textbox(label="Top Job Description Keywords")
 
         run_btn.click(
             analyze_resume,
             inputs=[file_in, job_desc, mode],
-            outputs=[score_slider, score_text, missing_out, suggestions_out, job_suggestions_out, resume_keywords_out,
+            outputs=[score_slider, score_text, missing_out, suggestions_out, job_suggestions_out, projects_out,
+                     project_fit_out, resume_keywords_out,
                      jd_keywords_out],
             show_progress='full'
         )
@@ -331,7 +383,7 @@ def build_ui():
             clear_inputs,
             inputs=[],
             outputs=[file_in, job_desc, mode, score_slider, score_text, missing_out, suggestions_out,
-                     job_suggestions_out, resume_keywords_out, jd_keywords_out]
+                     job_suggestions_out, projects_out, project_fit_out, resume_keywords_out, jd_keywords_out]
         )
 
     return demo
